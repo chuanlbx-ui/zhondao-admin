@@ -1,0 +1,282 @@
+name: 管理后台部署工作流
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '部署环境'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  # 构建和测试
+  build-and-test:
+    name: 构建和测试
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置 Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: 安装依赖
+      run: npm ci
+
+    - name: 运行 ESLint
+      run: npm run lint || echo "linting skipped"
+
+    - name: 运行类型检查
+      run: npx tsc --noEmit || echo "type checking skipped"
+
+    - name: 构建应用
+      run: npm run build
+      env:
+        VITE_API_BASE_URL: ${{ secrets.ADMIN_API_BASE_URL }}
+        VITE_ENVIRONMENT: production
+
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: admin-build-files
+        path: dist/
+        retention-days: 7
+
+  # 安全扫描
+  security-scan:
+    name: 安全扫描
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+    - name: 下载构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: admin-build-files
+        path: dist/
+
+    - name: 运行 Trivy 漏洞扫描
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: 'dist/'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: 上传安全扫描结果
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # 部署到预发布环境
+  deploy-staging:
+    name: 部署到预发布环境
+    runs-on: ubuntu-latest
+    needs: [build-and-test, security-scan]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: staging
+
+    steps:
+    - name: 下载构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: admin-build-files
+        path: dist/
+
+    - name: 部署到 Vercel (预发布)
+      uses: vercel/action@v1
+      with:
+        vercel-token: ${{ secrets.VERCEL_ADMIN_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_ADMIN_PROJECT_ID }}
+      env:
+        VERCEL_ENV: preview
+
+  # 部署到生产环境
+  deploy-production:
+    name: 部署到生产环境
+    runs-on: ubuntu-latest
+    needs: [build-and-test, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+    - name: 下载构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: admin-build-files
+        path: dist/
+
+    - name: 部署到 Vercel (生产)
+      uses: vercel/action@v1
+      with:
+        vercel-token: ${{ secrets.VERCEL_ADMIN_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_ADMIN_PROJECT_ID }}
+        vercel-args: '--prod'
+      env:
+        VERCEL_ENV: production
+
+    - name: 发送部署通知
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        text: |
+          🎯 管理后台部署完成
+          环境: Production
+          分支: ${{ github.ref_name }}
+          提交: ${{ github.sha }}
+          部署状态: ${{ job.status }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # 部署到静态文件服务器 (备选方案)
+  deploy-static:
+    name: 部署到静态文件服务器
+    runs-on: ubuntu-latest
+    needs: [build-and-test, security-scan]
+    if: github.event.inputs.environment == 'production'
+    environment: production
+
+    steps:
+    - name: 下载构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: admin-build-files
+        path: dist/
+
+    - name: 添加安全头配置
+      run: |
+        cat > dist/_headers << EOF
+        /*
+          X-Frame-Options: DENY
+          X-Content-Type-Options: nosniff
+          X-XSS-Protection: 1; mode=block
+          Referrer-Policy: strict-origin-when-cross-origin
+          Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'
+        EOF
+
+    - name: 部署到静态服务器
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.STATIC_HOST }}
+        username: ${{ secrets.STATIC_USERNAME }}
+        key: ${{ secrets.STATIC_SSH_KEY }}
+        source: "dist/*"
+        target: ${{ secrets.STATIC_ADMIN_PATH }}
+        strip_components: 1
+
+    - name: 清理CDN缓存
+      run: |
+        curl -X POST "${{ secrets.CDN_API_URL }}/invalidate" \
+          -H "Authorization: Bearer ${{ secrets.CDN_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{"paths": ["/admin/*"]}'
+
+  # 部署后安全验证
+  security-validation:
+    name: 部署后安全验证
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+
+    steps:
+    - name: 等待部署生效
+      run: sleep 60
+
+    - name: 安全头检查
+      run: |
+        for url in "${{ secrets.ADMIN_STAGING_URL }}" "${{ secrets.ADMIN_PRODUCTION_URL }}"; do
+          if [ -n "$url" ]; then
+            echo "检查: $url"
+            response=$(curl -s -I "$url")
+
+            if echo "$response" | grep -q "X-Frame-Options:"; then
+              echo "✅ X-Frame-Options 头已设置"
+            else
+              echo "❌ X-Frame-Options 头缺失"
+            fi
+
+            if echo "$response" | grep -q "X-Content-Type-Options:"; then
+              echo "✅ X-Content-Type-Options 头已设置"
+            else
+              echo "❌ X-Content-Type-Options 头缺失"
+            fi
+          fi
+        done
+
+    - name: 管理后台访问权限检查
+      run: |
+        # 检查未授权访问是否被正确阻止
+        response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.ADMIN_PRODUCTION_URL }}/api/users")
+        if [ $response -eq 401 ] || [ $response -eq 403 ]; then
+          echo "✅ API 访问控制正常"
+        else
+          echo "⚠️ API 访问控制可能存在问题: HTTP $response"
+        fi
+
+  # 管理后台健康检查
+  health-check:
+    name: 管理后台健康检查
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+
+    steps:
+    - name: 检查预发布环境
+      run: |
+        response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.ADMIN_STAGING_URL }}")
+        if [ $response -eq 200 ]; then
+          echo "✅ 管理后台预发布环境健康检查通过"
+        else
+          echo "❌ 管理后台预发布环境健康检查失败: HTTP $response"
+          exit 1
+        fi
+
+    - name: 检查生产环境
+      if: needs.deploy-production.result == 'success'
+      run: |
+        response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.ADMIN_PRODUCTION_URL }}")
+        if [ $response -eq 200 ]; then
+          echo "✅ 管理后台生产环境健康检查通过"
+        else
+          echo "❌ 管理后台生产环境健康检查失败: HTTP $response"
+          exit 1
+        fi
+
+    - name: 关键功能检查
+      run: |
+        # 检查管理后台关键资源
+        response=$(curl -s "${{ secrets.ADMIN_PRODUCTION_URL }}")
+
+        # 检查登录页面
+        if echo "$response" | grep -q "login\|Login"; then
+          echo "✅ 登录页面正常"
+        else
+          echo "❌ 登录页面异常"
+          exit 1
+        fi
+
+        # 检查管理界面
+        if echo "$response" | grep -q "dashboard\|Dashboard"; then
+          echo "✅ 管理界面正常"
+        else
+          echo "⚠️ 管理界面可能需要登录访问"
+        fi

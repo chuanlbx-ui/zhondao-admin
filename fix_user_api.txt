@@ -1,0 +1,53 @@
+﻿  getList: async (params?: any) => {
+    const cacheKey = `users_list_${JSON.stringify(params)}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/admin/users', { params })
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('User list API error:', error)
+      throw error
+    }
+  },
+
+  getDetail: async (id: string) => {
+    const cacheKey = `user_detail_${id}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get(`/admin/users/${id}`)
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error(`User detail API error (${id}):`, error)
+      throw error
+    }
+  },
+
+  update: async (id: string, data: any) => {
+    try {
+      const response = await adminApiClient.put(`/admin/users/${id}`, data)
+      cacheManager.clear()
+      return response.data || response
+    } catch (error) {
+      console.error(`Update user API error (${id}):`, error)
+      throw error
+    }
+  },
+
+  delete: async (id: string) => {
+    try {
+      const response = await adminApiClient.delete(`/admin/users/${id}`)
+      cacheManager.clear()
+      return response.data || response
+    } catch (error) {
+      console.error(`Delete user API error (${id}):`, error)
+      throw error
+    }
+  },

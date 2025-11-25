@@ -1,0 +1,43 @@
+.users-page {
+  width: 100%;
+}
+
+.user-detail p {
+  margin: 12px 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.user-detail strong {
+  color: #333;
+  margin-right: 12px;
+}
+
+/* 头像上传样式 */
+.avatar-uploader .ant-upload {
+  width: 128px;
+  height: 128px;
+  border-radius: 8px;
+}
+
+.avatar-uploader .ant-upload:hover .avatar-overlay {
+  opacity: 1 !important;
+}
+
+.avatar-uploader img {
+  border-radius: 8px;
+}
+
+/* 表单验证样式增强 */
+.ant-form-item-has-error .ant-input,
+.ant-form-item-has-error .ant-select-selector,
+.ant-form-item-has-error .ant-input-number {
+  border-color: #ff4d4f;
+}
+
+.ant-form-item-has-error .ant-form-item-explain-error {
+  font-size: 12px;
+  margin-top: 4px;
+}

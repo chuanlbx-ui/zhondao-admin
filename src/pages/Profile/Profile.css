@@ -1,0 +1,21 @@
+/* 个人中心页面样式 */
+.profile-page {
+  animation: fadeInDown 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.profile-page .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.profile-page .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.profile-page .ant-input,
+.profile-page .ant-input-password {
+  border-radius: 4px;
+}
+
+.profile-page .ant-form-item-label > label {
+  font-weight: 500;
+}

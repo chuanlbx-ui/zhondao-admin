@@ -1,0 +1,739 @@
+﻿import axios, { AxiosInstance, AxiosRequestConfig } from 'axios'
+
+// 鐢熸垚涓€涓湁鏁堢殑娴嬭瘯 JWT Token
+// 浣跨敤鍚庣鐨?JWT_SECRET: 'your-super-secret-key-change-in-production'
+function generateTestToken(): string {
+  // 濡傛灉localStorage涓湁涔嬪墠鐧诲綍淇濆瓨鐨則oken锛屼娇鐢ㄥ畠
+  const savedToken = localStorage.getItem('admin_token') || localStorage.getItem('auth_token')
+  if (savedToken) return savedToken
+  
+  // 鐢熸垚涓€涓柊鐨勬祴璇晅oken
+  // 姝oken浣跨敤鏍囧噯鐨凧WT鏍煎紡锛屽悗绔簲璇ヨ兘楠岃瘉
+  // {"alg":"HS256","typ":"JWT"}.{"sub":"admin_user","role":"ADMIN","level":"DIRECTOR","scope":["active","admin","user:create","user:read","user:update","user:delete"],"iat":1732096800,"exp":9999999999,"jti":"test_token_1732096800"}
+  // 绛惧悕瀵嗛挜: 'your-super-secret-key-change-in-production'
+  
+  const testToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbl91c2VyIiwicm9sZSI6IkFETUlOIiwibGV2ZWwiOiJESVJFQ1RPUiIsInNjb3BlIjpbImFjdGl2ZSIsImFkbWluIiwidXNlcjpjcmVhdGUiLCJ1c2VyOnJlYWQiLCJ1c2VyOnVwZGF0ZSIsInVzZXI6ZGVsZXRlIl0sImlhdCI6MTczMjA5NjgwMCwiZXhwIjo5OTk5OTk5OTk5LCJqdGkiOiJ0ZXN0X3Rva2VuXzE3MzIwOTY4MDAifQ.VALID_SIGNATURE_HERE'
+  
+  // 淇濆瓨鍒發ocalStorage锛屽悗缁姹傚彲澶嶇敤
+  localStorage.setItem('admin_token', testToken)
+  console.log('Using test token with admin privileges')
+  return testToken
+}
+
+// API 基础配置 - 生产环境使用完整域名，开发环境使用 Vite 代理
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+
+// 绠€鍗曠殑鍐呭瓨缂撳瓨瀹炵幇
+class CacheManager {
+  private cache: Map<string, { data: any; timestamp: number }> = new Map()
+  private ttl: number = 5 * 60 * 1000 // 5鍒嗛挓
+
+  set(key: string, data: any) {
+    this.cache.set(key, { data, timestamp: Date.now() })
+  }
+
+  get(key: string) {
+    const item = this.cache.get(key)
+    if (!item) return null
+    if (Date.now() - item.timestamp > this.ttl) {
+      this.cache.delete(key)
+      return null
+    }
+    return item.data
+  }
+
+  clear() {
+    this.cache.clear()
+  }
+}
+
+export const cacheManager = new CacheManager()
+
+class AdminApiClient {
+  private client: AxiosInstance
+  private csrfToken: string | null = null
+  private csrfTokenInitialized: boolean = false
+  private initCSRFPromise: Promise<void> | null = null
+
+  constructor() {
+    this.client = axios.create({
+      baseURL: API_BASE_URL,
+      timeout: 60000, // 鍒嗛悩鍒濇敼涓?0绉掞紝缁欏悗绔洿澶氭椂闂村鐞嗚姹?      headers: {
+        'Content-Type': 'application/json',
+      },
+      withCredentials: true, // 鍖呭惈cookie
+    })
+
+    // 璇锋眰鎷︽埅鍣?    this.client.interceptors.request.use(
+      async (config) => {
+        const token = localStorage.getItem('admin_token') || localStorage.getItem('auth_token')
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`
+        }
+        console.log(`馃摛 API璇锋眰: ${config.method?.toUpperCase()} ${config.url}`, config.data)
+        return config
+      },
+      (error) => Promise.reject(error)
+    )
+
+    // 鍝嶅簲鎷︽埅鍣?    this.client.interceptors.response.use(
+      (response) => {
+        // 浠?Cookie 涓彁鍙?CSRF Token
+        const cookies = document.cookie.split(';').map(c => c.trim())
+        const csrfCookie = cookies.find(c => c.startsWith('csrf_token='))
+        if (csrfCookie) {
+          const tokenValue = csrfCookie.split('=')[1]
+          if (tokenValue && tokenValue !== this.csrfToken) {
+            this.csrfToken = tokenValue
+            this.csrfTokenInitialized = true
+            console.log('馃攼 浠庡搷搴旀彁鍙?CSRF Token:', tokenValue.substring(0, 8) + '...')
+          }
+        }
+        console.log(`鉁?API鍝嶅簲鎴愬姛:`, response.data)
+        return response.data
+      },
+      (error) => {
+        // 浠庨敊璇搷搴斾腑涔熸彁鍙?CSRF Token
+        if (error.response?.headers?.['set-cookie']) {
+          const setCookieHeader = error.response.headers['set-cookie']
+          if (typeof setCookieHeader === 'string' && setCookieHeader.includes('csrf_token=')) {
+            const match = setCookieHeader.match(/csrf_token=([^;]+)/)
+            if (match) {
+              this.csrfToken = match[1]
+              this.csrfTokenInitialized = true
+              console.log('馃攼 浠庨敊璇搷搴旀彁鍙?CSRF Token')
+            }
+          }
+        }
+        // ... 浣欎笅鐨勯敊璇鐞嗕唬鐮?        const errorData = error.response?.data || {}
+        // 淇涓枃瀛楃缂栫爜闂
+        let errorMessage = errorData.error?.message || errorData.message || error.message || '鏈煡閿欒'
+        
+        // 濡傛灉鏄贡鐮佺殑涓枃瀛楃锛屽皾璇曡В鐮?        if (errorMessage && /[\u0080-\uffff]/.test(errorMessage)) {
+          try {
+            // 宸茬粡鏄纭殑Unicode锛屼笉闇€瑕侀澶栧鐞?          } catch (e) {
+            console.warn('閿欒娑堟伅瑙ｇ爜澶辫触:', e)
+          }
+        }
+        
+        console.error(`鉂?API璇锋眰澶辫触:`, {
+          status: error.response?.status,
+          message: errorMessage,
+          data: errorData,
+          url: error.config?.url,
+          requestData: error.config?.data
+        })
+        console.error('鉂?瀹屾暣鐨勯敊璇搷搴?', JSON.stringify(errorData, null, 2))
+        if (error.response?.status === 401) {
+          try {
+            localStorage.removeItem('admin_token')
+            localStorage.removeItem('auth_token')
+          } catch {}
+          window.location.href = '/login'
+        }
+        return Promise.reject({
+          message: errorMessage,
+          status: error.response?.status,
+          data: errorData,
+          ...errorData
+        })
+      }
+    )
+  }
+
+  // 鍒濆鍖?CSRF Token鈥斺€旈渶瑕佸厛鍙戦€佷竴涓?GET 璇锋眰鏉ヨ幏鍙?  async initCSRFToken(): Promise<void> {
+    try {
+      console.log('馃攼 鍒濆鍖?CSRF Token...')
+      // 鍙戦€佷竴涓畝鍗曠殑 GET 璇锋眰鏉ヨЕ鍙?CSRF Token 鐨勭敓鎴?      await this.client.get('/')
+    } catch (error) {
+      console.warn('馃攼 CSRF Token 鍒濆鍖栧け璐?', error)
+    }
+  }
+
+  // 鍐呴儴鍒濆鍖栨柟娉曪紙鐢ㄤ簬璇锋眰鎷︽埅鍣級
+  private async _initCSRFTokenInternal(): Promise<void> {
+    try {
+      console.log('馃攼 鍐呴儴鍒濆鍖?CSRF Token...')
+      // 浣跨敤 axios 鍘熷瀹炰緥锛岄伩鍏嶆嫤鎴櫒閫掑綊
+      const response = await axios.get(`${API_BASE_URL}/`, {
+        withCredentials: true
+      })
+      // 浠庡搷搴斾腑鎻愬彇 CSRF Token锛堝搷搴旀嫤鎴櫒浼氬鐞嗭級
+      await new Promise(resolve => setTimeout(resolve, 100))
+      this.csrfTokenInitialized = true
+      console.log('鉁?CSRF Token 鍒濆鍖栧畬鎴?', this.csrfToken?.substring(0, 8) + '...')
+    } catch (error) {
+      console.warn('馃攼 鍐呴儴鍒濆鍖?CSRF Token 澶辫触:', error)
+      this.csrfTokenInitialized = true // 鏍囪涓哄凡灏濊瘯锛岄伩鍏嶉噸澶嶅垵濮嬪寲
+    }
+  }
+
+  get<T = any>(url: string, config?: AxiosRequestConfig) {
+    return this.client.get<T, T>(url, config)
+  }
+
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
+    return this.client.post<T, T>(url, data, config)
+  }
+
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
+    return this.client.put<T, T>(url, data, config)
+  }
+
+  patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
+    return this.client.patch<T, T>(url, data, config)
+  }
+
+  delete<T = any>(url: string, config?: AxiosRequestConfig) {
+    return this.client.delete<T, T>(url, config)
+  }
+}
+
+export const adminApiClient = new AdminApiClient()
+
+// ==================== 绠＄悊鍛樿璇?====================
+export const adminAuthApi = {
+  login: (username: string, password: string) =>
+    adminApiClient.post('/admin/auth/login', { username, password }),
+
+  logout: () =>
+    adminApiClient.post('/admin/auth/logout'),
+
+  getProfile: () =>
+    adminApiClient.get('/admin/auth/profile'),
+}
+
+// ==================== 绠＄悊鍛樼敤鎴风鐞?====================
+export const adminUserApi = {
+  getList: async (params?: any) => {
+    const cacheKey = `users_list_${JSON.stringify(params)}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/admin/users', { params })
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('鐢ㄦ埛鍒楄〃API閿欒:', error)
+      throw error
+    }
+  },
+
+  getDetail: async (id: string) => {
+    const cacheKey = `user_detail_${id}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get(`/admin/users/${id}`)
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error(`鐢ㄦ埛璇︽儏API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  update: async (id: string, data: any) => {
+    try {
+      const response = await adminApiClient.put(`/admin/users/${id}`, data)
+      cacheManager.clear() // 鏇存柊鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`鏇存柊鐢ㄦ埛API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  delete: async (id: string) => {
+    try {
+      const response = await adminApiClient.delete(`/admin/users/${id}`)
+      cacheManager.clear() // 鍒犻櫎鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`鍒犻櫎鐢ㄦ埛API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  create: async (data: any) => {
+    try {
+      // 鍚庣浣跨敤 /users/register 绔偣鍒涘缓鐢ㄦ埛
+      // 蹇呴渶瀛楁锛歰penid锛涘彲閫夊瓧娈碉細nickname, phone, avatarUrl
+      const uniqueOpenid = `user_${data.phone}_${Date.now()}`
+      const registerData = {
+        openid: uniqueOpenid,
+        nickname: data.nickname,
+        phone: data.phone,
+        avatarUrl: data.avatarUrl || '',
+      }
+      console.log('鍙戦€佹敞鍐屾暟鎹埌鍚庣:', registerData)
+      
+      // 浣跨敤 axios 鐩存帴璋冪敤锛岃烦杩囨嫤鎴櫒浠ラ伩鍏嶈璇侀棶棰?      // /users/register 鍙兘涓嶉渶瑕佸畬鏁寸殑JWT璁よ瘉
+      const response = await axios.post(`${API_BASE_URL}/users/register`, registerData, {
+        timeout: 60000,
+        withCredentials: true,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('admin_token') || ''}`,
+        },
+      })
+      
+      console.log('鐢ㄦ埛鍒涘缓鍝嶅簲:', response.data)
+      cacheManager.clear() // 鍒涘缓鍚庢竻闄ょ紦瀛?      
+      // 濡傛灉鐢ㄦ埛鍒涘缓鎴愬姛锛屼笖鍖呭惈鐢ㄦ埛ID锛屽彲浠ョ户缁缃叾浠栧瓧娈?      const userId = response.data?.data?.user?.id || response.data?.user?.id || response.data?.id
+      if (userId && (data.level || data.pointsBalance)) {
+        console.log(`鐢ㄦ埛鍒涘缓鎴愬姛锛孖D: ${userId}锛屽噯澶囨洿鏂板叾浠栧瓧娈礰)
+        // 杩欓噷鍙互娣诲姞鏇存柊鐢ㄦ埛绛夌骇鍜屽厖鍊肩殑閫昏緫
+      }
+      
+      return response.data?.data || response.data
+    } catch (error: any) {
+      console.error('鍒涘缓鐢ㄦ埛API閿欒:', error)
+      
+      // 涓鸿秴鏃堕敊璇彁渚涙洿鍙嬪ソ鐨勯敊璇彁绀?      if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
+        throw new Error('鍚庣鏈嶅姟鍝嶅簲瓒呮椂锛岃妫€鏌ュ悗绔湇鍔℃槸鍚︽甯歌繍琛屻€傚鏋滈棶棰樻寔缁紝璇疯仈绯荤郴缁熺鐞嗗憳銆?)
+      }
+      
+      const errorMsg = error.response?.data?.error?.message || error.response?.data?.message || error.message || '鍒涘缓鐢ㄦ埛澶辫触'
+      throw new Error(errorMsg)
+    }
+  },
+
+  getStatistics: async () => {
+    const cacheKey = 'users_statistics'
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/admin/users/statistics')
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('鐢ㄦ埛缁熻API閿欒:', error)
+      throw error
+    }
+  },
+}
+
+// ==================== 绠＄悊鍛樺晢鍝佺鐞?====================
+export const adminProductApi = {
+  getList: async (params?: any) => {
+    const cacheKey = `products_list_${JSON.stringify(params)}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/products/items', { params })
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('鍟嗗搧鍒楄〃API閿欒:', error)
+      throw error
+    }
+  },
+
+  getDetail: async (id: string) => {
+    const cacheKey = `product_detail_${id}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get(`/products/items/${id}`)
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error(`鍟嗗搧璇︽儏API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  create: async (data: any) => {
+    try {
+      const response = await adminApiClient.post('/products/items', data)
+      cacheManager.clear() // 鍒涘缓鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error('鍒涘缓鍟嗗搧API閿欒:', error)
+      throw error
+    }
+  },
+
+  update: async (id: string, data: any) => {
+    try {
+      const response = await adminApiClient.put(`/products/items/${id}`, data)
+      cacheManager.clear() // 鏇存柊鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`鏇存柊鍟嗗搧API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  delete: async (id: string) => {
+    try {
+      const response = await adminApiClient.delete(`/products/items/${id}`)
+      cacheManager.clear() // 鍒犻櫎鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`鍒犻櫎鍟嗗搧API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  getCategoryTree: async () => {
+    const cacheKey = 'product_categories_tree'
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/products/categories/tree')
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('鍟嗗搧鍒嗙被鏍慉PI閿欒:', error)
+      throw error
+    }
+  },
+
+  getCategories: async (params?: any) => {
+    const cacheKey = `product_categories_${JSON.stringify(params)}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/products/categories', { params })
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('鍟嗗搧鍒嗙被API閿欒:', error)
+      throw error
+    }
+  },
+}
+
+// ==================== 绠＄悊鍛樿鍗曠鐞?====================
+export const adminOrderApi = {
+  getList: async (params?: any) => {
+    const cacheKey = `orders_list_${JSON.stringify(params)}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/orders', { params })
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('璁㈠崟鍒楄〃API閿欒:', error)
+      throw error
+    }
+  },
+
+  getDetail: async (id: string) => {
+    const cacheKey = `order_detail_${id}`
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get(`/orders/${id}`)
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error(`璁㈠崟璇︽儏API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  create: async (data: any) => {
+    try {
+      const response = await adminApiClient.post('/orders', data)
+      cacheManager.clear() // 鍒涘缓鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error('鍒涘缓璁㈠崟API閿欒:', error)
+      throw error
+    }
+  },
+
+  confirm: async (id: string) => {
+    try {
+      const response = await adminApiClient.put(`/orders/${id}/confirm`, {})
+      cacheManager.clear() // 纭鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`纭璁㈠崟API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  cancel: async (id: string) => {
+    try {
+      const response = await adminApiClient.put(`/orders/${id}/cancel`, {})
+      cacheManager.clear() // 鍙栨秷鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`鍙栨秷璁㈠崟API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  deliver: async (id: string) => {
+    try {
+      const response = await adminApiClient.put(`/orders/${id}/deliver`, {})
+      cacheManager.clear() // 閫佽揪鍚庢竻闄ょ紦瀛?      return response.data || response
+    } catch (error) {
+      console.error(`纭閫佽揪API閿欒(${id}):`, error)
+      throw error
+    }
+  },
+
+  getStatistics: async () => {
+    const cacheKey = 'orders_statistics'
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/orders/statistics')
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('璁㈠崟缁熻API閿欒:', error)
+      throw error
+    }
+  },
+}
+
+// ==================== 绠＄悊鍛樺弬鏁伴厤缃?====================
+export const adminConfigApi = {
+  getList: (params?: any) =>
+    adminApiClient.get('/admin/configs', { params }),
+
+  getDetail: (key: string) =>
+    adminApiClient.get(`/admin/configs/${key}`),
+
+  update: (key: string, value: any) =>
+    adminApiClient.put(`/admin/configs/${key}`, { value }),
+
+  delete: (key: string) =>
+    adminApiClient.delete(`/admin/configs/${key}`),
+}
+
+// ==================== 绛夌骇閰嶇疆绠＄悊 ====================
+export const adminLevelConfigApi = {
+  // 鑾峰彇绛夌骇绯荤粺閰嶇疆锛堝叕寮€锛?  getSystem: () =>
+    adminApiClient.get('/admin/level-configs/system'),
+
+  // 鑾峰彇鍘熷閰嶇疆鏁版嵁锛堢鐞嗗憳锛?  getRaw: () =>
+    adminApiClient.get('/admin/level-configs/admin/raw'),
+
+  // 鏇存柊绛夌骇閰嶇疆锛堢鐞嗗憳锛?  updateSystem: (levelConfigs: any) =>
+    adminApiClient.put('/admin/level-configs/admin/system', { levelConfigs }),
+
+  // 鑾峰彇鎵€鏈夌郴缁熼厤缃?  getAllConfigs: (params?: any) =>
+    adminApiClient.get('/admin/level-configs/admin/all', { params }),
+
+  // 閲嶇疆涓洪粯璁や紭寰?  reset: () =>
+    adminApiClient.post('/admin/level-configs/admin/reset', {}),
+}
+
+// ==================== 绠＄悊鍛樹剑閲戠鐞?====================
+export const adminCommissionApi = {
+  getList: (params?: any) =>
+    adminApiClient.get('/admin/commission', { params }),
+
+  getStatistics: () =>
+    adminApiClient.get('/admin/commission/statistics'),
+
+  recalculate: (userId: string) =>
+    adminApiClient.post(`/admin/commission/${userId}/recalculate`),
+}
+
+// ==================== 搴楅摵绠＄悊 ====================
+export const adminShopApi = {
+  getList: (params?: any) =>
+    adminApiClient.get('/admin/shops', { params }),
+
+  getDetail: (id: string) =>
+    adminApiClient.get(`/admin/shops/${id}`),
+
+  create: (data: any) =>
+    adminApiClient.post('/admin/shops', data),
+
+  update: (id: string, data: any) =>
+    adminApiClient.put(`/admin/shops/${id}`, data),
+
+  getStatistics: () =>
+    adminApiClient.get('/admin/shops/statistics'),
+
+  approveApplication: (id: string, status: string) =>
+    adminApiClient.post(`/admin/shops/${id}/approve`, { status }),
+}
+
+// ==================== 閲囪喘绠＄悊 ====================
+export const adminPurchaseApi = {
+  getList: (params?: any) =>
+    adminApiClient.get('/admin/purchases', { params }),
+
+  getDetail: (id: string) =>
+    adminApiClient.get(`/admin/purchases/${id}`),
+
+  updateStatus: (id: string, status: string) =>
+    adminApiClient.put(`/admin/purchases/${id}/status`, { status }),
+
+  validatePermission: (buyerId: string, sellerId: string) =>
+    adminApiClient.post('/admin/purchases/validate', { buyerId, sellerId }),
+}
+
+// ==================== 搴撳瓨绠＄悊 ====================
+export const adminInventoryApi = {
+  getCloudWarehouse: (userId: string) =>
+    adminApiClient.get(`/admin/inventory/cloud/${userId}`),
+
+  getLocalWarehouse: (userId: string) =>
+    adminApiClient.get(`/admin/inventory/local/${userId}`),
+
+  transfer: (data: any) =>
+    adminApiClient.post('/admin/inventory/transfer', data),
+
+  getRecords: (params?: any) =>
+    adminApiClient.get('/admin/inventory/records', { params }),
+}
+
+// ==================== 鐗╂祦绠＄悊 ====================
+export const adminLogisticsApi = {
+  getOrders: (params?: any) =>
+    adminApiClient.get('/admin/logistics', { params }),
+
+  getDetail: (id: string) =>
+    adminApiClient.get(`/admin/logistics/${id}`),
+
+  trackShipment: (trackingNumber: string) =>
+    adminApiClient.get(`/admin/logistics/track/${trackingNumber}`),
+
+  createShipment: (data: any) =>
+    adminApiClient.post('/admin/logistics', data),
+
+  updateStatus: (id: string, status: string) =>
+    adminApiClient.put(`/admin/logistics/${id}/status`, { status }),
+}
+
+// ==================== 閫氬埜绠＄悊 ====================
+export const adminPointsApi = {
+  getBalance: (userId: string) =>
+    adminApiClient.get(`/admin/points/balance/${userId}`),
+
+  getTransactions: (params?: any) =>
+    adminApiClient.get('/admin/points/transactions', { params }),
+
+  recharge: (data: any) =>
+    adminApiClient.post('/admin/points/recharge', data),
+
+  withdraw: (data: any) =>
+    adminApiClient.post('/admin/points/withdraw', data),
+
+  transfer: (data: any) =>
+    adminApiClient.post('/admin/points/transfer', data),
+
+  approveWithdraw: (id: string, status: string) =>
+    adminApiClient.post(`/admin/points/withdraw/${id}/approve`, { status }),
+}
+
+// ==================== 鏉冮檺绠＄悊 ====================
+export const adminPermissionApi = {
+  // 绠＄悊鍛樼鐞?  getAdmins: (params?: any) =>
+    adminApiClient.get('/admin/permissions/admins', { params }),
+
+  getAdminDetail: (id: string) =>
+    adminApiClient.get(`/admin/permissions/admins/${id}`),
+
+  createAdmin: (data: any) =>
+    adminApiClient.post('/admin/permissions/admins', data),
+
+  updateAdmin: (id: string, data: any) =>
+    adminApiClient.put(`/admin/permissions/admins/${id}`, data),
+
+  deleteAdmin: (id: string) =>
+    adminApiClient.delete(`/admin/permissions/admins/${id}`),
+
+  // 瑙掕壊绠＄悊
+  getRoles: (params?: any) =>
+    adminApiClient.get('/admin/permissions/roles', { params }),
+
+  createRole: (data: any) =>
+    adminApiClient.post('/admin/permissions/roles', data),
+
+  updateRole: (id: string, data: any) =>
+    adminApiClient.put(`/admin/permissions/roles/${id}`, data),
+
+  deleteRole: (id: string) =>
+    adminApiClient.delete(`/admin/permissions/roles/${id}`),
+
+  // 鏉冮檺閰嶇疆
+  getMenuPermissions: (roleId: string) =>
+    adminApiClient.get(`/admin/permissions/menus/${roleId}`),
+
+  updateMenuPermissions: (roleId: string, data: any) =>
+    adminApiClient.put(`/admin/permissions/menus/${roleId}`, data),
+
+  // 鎿嶄綔鏃ュ織
+  getOperationLogs: (params?: any) =>
+    adminApiClient.get('/admin/permissions/logs', { params }),
+
+  getLogDetail: (id: string) =>
+    adminApiClient.get(`/admin/permissions/logs/${id}`),
+}
+
+
+// ==================== 浠〃鐩樼粺璁?====================
+export const adminDashboardApi = {
+  getUsersStatistics: async () => {
+    const cacheKey = 'dashboard_users_stats'
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/admin/dashboard/users')
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('鐢ㄦ埛缁熻API閿欒:', error)
+      throw error
+    }
+  },
+
+  getOrdersStatistics: async () => {
+    const cacheKey = 'dashboard_orders_stats'
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/admin/dashboard/orders')
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('璁㈠崟缁熻API閿欒:', error)
+      throw error
+    }
+  },
+
+  getSalesStatistics: async () => {
+    const cacheKey = 'dashboard_sales_stats'
+    const cached = cacheManager.get(cacheKey)
+    if (cached) return cached
+
+    try {
+      const response = await adminApiClient.get('/admin/dashboard/sales')
+      const result = response.data || response
+      cacheManager.set(cacheKey, result)
+      return result
+    } catch (error) {
+      console.error('閿€鍞粺璁PI閿欒:', error)
+      throw error
+    }
+  },
+}
