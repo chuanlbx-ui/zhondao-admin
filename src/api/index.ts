@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿import axios, { AxiosInstance, AxiosRequestConfig } from 'axios'
+﻿﻿﻿﻿﻿﻿import axios, { AxiosInstance, AxiosRequestConfig } from 'axios'
 
 // @ts-ignore
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:3000/api/v1'
@@ -281,6 +281,28 @@ export const adminSettingsApi = {
 
   update: (data: any) =>
     adminApiClient.put('/admin/settings', data),
+}
+
+export const adminBannerApi = {
+  getList: () =>
+    adminApiClient.get('/admin/banners'),
+
+  create: (data: FormData) =>
+    adminApiClient.post('/admin/banners', data, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }),
+
+  update: (id: string, data: FormData) =>
+    adminApiClient.put(`/admin/banners/${id}`, data, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }),
+
+  delete: (id: string) =>
+    adminApiClient.delete(`/admin/banners/${id}`),
 }
 
 export default adminApiClient

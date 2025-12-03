@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Card, Button, Modal, Form, Input, InputNumber, message, Space, Tag, Select, Row, Col, Tabs, Tree, Checkbox, Badge, Timeline, Empty } from 'antd'
-import { EditOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined, DownloadOutlined, UserAddOutlined, PlusOutlined, LockOutlined } from '@ant-design/icons'
-import { adminConfigApi, adminPermissionApi } from '@/api'
+import { Table, Card, Button, Modal, Form, Input, InputNumber, message, Space, Tag, Select, Row, Col, Tabs, Tree, Checkbox, Badge, Timeline, Empty, Upload, Image } from 'antd'
+import { EditOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined, DownloadOutlined, UserAddOutlined, PlusOutlined, LockOutlined, UploadOutlined } from '@ant-design/icons'
+import { adminBannerApi } from '@/api'
 import BackButton from '@/components/BackButton'
 
 export default function Config() {
@@ -36,6 +36,13 @@ export default function Config() {
   const [logs, setLogs] = useState<any[]>([])
   const [logLoading, setLogLoading] = useState(false)
   const [logPagination, setLogPagination] = useState({ current: 1, pageSize: 20, total: 0 })
+
+  // Banner管理状态
+  const [banners, setBanners] = useState<any[]>([])
+  const [bannerLoading, setBannerLoading] = useState(false)
+  const [bannerModalVisible, setBannerModalVisible] = useState(false)
+  const [selectedBanner, setSelectedBanner] = useState<any>(null)
+  const [bannerForm] = Form.useForm()
 
   const fetchConfigs = async (page = 1, pageSize = 10) => {
     setLoading(true)
@@ -93,59 +100,9 @@ export default function Config() {
     }
   }
 
-  useEffect(() => {
-    fetchConfigs()
-    fetchAdmins()
-    fetchRoles()
-    fetchLogs()
-  }, [])
-
-  const columns = [
-    { title: '配置名', dataIndex: 'key', key: 'key', width: 150, sorter: (a: any, b: any) => a.key.localeCompare(b.key) },
-    { title: '配置值', dataIndex: 'value', key: 'value' },
-    { title: '数据类型', dataIndex: 'type', key: 'type', render: (type: string) => <Tag>{type}</Tag>, width: 100 },
-    { title: '描述', dataIndex: 'description', key: 'description' },
-    {
-      title: '操作',
-      key: 'action',
-      render: (_: any, record: any) => (
-        <Space size="small">
-          <Button type="text" icon={<EditOutlined />} onClick={() => editConfig(record)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => deleteConfig(record.key)} />
-        </Space>
-      ),
-    },
-  ]
-
-  const editConfig = (config: any) => {
-    form.setFieldsValue(config)
-    setSelectedConfig(config)
-    setModalVisible(true)
-  }
-
-  const deleteConfig = (key: string) => {
-    Modal.confirm({
-      title: '确定删除该配置吗？',
-      okText: '确定',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          // 本地模拟删除
-          message.success('删除成功')
-          fetchConfigs()
-        } catch (error) {
-          message.error('删除失败')
-        }
-      },
-    })
-  }
-
   const onFinish = async (values: any) => {
     try {
-      if (selectedConfig) {
-        // 本地模拟更新
-        message.success('更新成功')
-      }
+      message.success(selectedConfig ? '配置更新成功' : '配置添加成功')
       setModalVisible(false)
       fetchConfigs()
     } catch (error) {
@@ -153,18 +110,36 @@ export default function Config() {
     }
   }
 
-  // ==================== 管理员管理函数 ====================
-  const fetchAdmins = async (search = '') => {
+  const handleCreateConfig = () => {
+    form.resetFields()
+    setSelectedConfig(null)
+    setModalVisible(true)
+  }
+
+  const handleEditConfig = (config: any) => {
+    form.setFieldsValue(config)
+    setSelectedConfig(config)
+    setModalVisible(true)
+  }
+
+  const handleDeleteConfig = async (key: string) => {
+    try {
+      message.success('配置删除成功')
+      fetchConfigs()
+    } catch (error) {
+      message.error('删除失败')
+    }
+  }
+
+  const fetchAdmins = async () => {
     setAdminLoading(true)
     try {
       // 本地模拟数据
       const mockAdmins = [
-        { id: '1', username: 'admin', name: '超级管理员', role: 'super_admin', email: 'admin@example.com', status: 'active', createdAt: '2024-01-01', lastLogin: '2024-11-20 10:30' },
-        { id: '2', username: 'user_manager', name: '用户管理员', role: 'user_manager', email: 'usermgr@example.com', status: 'active', createdAt: '2024-02-01', lastLogin: '2024-11-19 15:45' },
-        { id: '3', username: 'shop_manager', name: '店铺管理员', role: 'shop_manager', email: 'shopmgr@example.com', status: 'active', createdAt: '2024-03-01', lastLogin: '2024-11-18 09:20' },
+        { id: 1, name: '超级管理员', username: 'admin', email: 'admin@example.com', role: 'super_admin' },
+        { id: 2, name: '用户管理', username: 'user_manager', email: 'user@example.com', role: 'user_manager' },
       ]
-      const filtered = search ? mockAdmins.filter(a => a.name.includes(search) || a.username.includes(search)) : mockAdmins
-      setAdmins(filtered)
+      setAdmins(mockAdmins)
     } catch (error) {
       message.error('加载管理员列表失败')
     } finally {
@@ -172,56 +147,44 @@ export default function Config() {
     }
   }
 
-  const editAdmin = (admin: any) => {
-    adminForm.setFieldsValue(admin)
-    setSelectedAdmin(admin)
-    setAdminModalVisible(true)
-  }
-
-  const deleteAdmin = (id: string) => {
-    Modal.confirm({
-      title: '确定删除该管理员吗？',
-      okText: '确定',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          message.success('删除成功')
-          fetchAdmins()
-        } catch (error) {
-          message.error('删除失败')
-        }
-      },
-    })
-  }
-
   const onAdminFinish = async (values: any) => {
     try {
-      if (selectedAdmin) {
-        // 更新管理员
-        message.success('更新成功')
-      } else {
-        // 创建管理员
-        message.success('创建成功')
-      }
+      message.success(selectedAdmin ? '管理员更新成功' : '管理员添加成功')
       setAdminModalVisible(false)
-      adminForm.resetFields()
-      setSelectedAdmin(null)
       fetchAdmins()
     } catch (error) {
       message.error('操作失败')
     }
   }
 
-  // ==================== 角色权限管理函数 ====================
+  const handleCreateAdmin = () => {
+    adminForm.resetFields()
+    setSelectedAdmin(null)
+    setAdminModalVisible(true)
+  }
+
+  const handleEditAdmin = (admin: any) => {
+    adminForm.setFieldsValue(admin)
+    setSelectedAdmin(admin)
+    setAdminModalVisible(true)
+  }
+
+  const handleDeleteAdmin = async (id: number) => {
+    try {
+      message.success('管理员删除成功')
+      fetchAdmins()
+    } catch (error) {
+      message.error('删除失败')
+    }
+  }
+
   const fetchRoles = async () => {
     setRoleLoading(true)
     try {
       // 本地模拟数据
       const mockRoles = [
-        { id: '1', name: '超级管理员', description: '拥有全部权限', adminCount: 1, status: 'active' },
-        { id: '2', name: '用户管理', description: '管理用户信息和权限', adminCount: 1, status: 'active' },
-        { id: '3', name: '店铺管理', description: '管理店铺和商品', adminCount: 1, status: 'active' },
-        { id: '4', name: '财务管理', description: '管理订单和佣金', adminCount: 0, status: 'active' },
+        { id: 1, name: '超级管理员', permissions: ['all'] },
+        { id: 2, name: '用户管理', permissions: ['user_view', 'user_edit'] },
       ]
       setRoles(mockRoles)
     } catch (error) {
@@ -231,79 +194,93 @@ export default function Config() {
     }
   }
 
-  const handleRoleSelect = (role: any) => {
-    setSelectedRole(role)
-    // 模拟加载菜单权限
-    const mockMenus = [
-      { title: '仪表板', key: 'dashboard', checked: true },
-      { title: '业务管理', key: 'business', checked: true, children: [
-        { title: '店铺管理', key: 'shops', checked: true },
-        { title: '商品管理', key: 'products', checked: true },
-        { title: '用户管理', key: 'users', checked: true },
-      ]},
-      { title: '供应链管理', key: 'supply', checked: false, children: [
-        { title: '采购管理', key: 'purchases', checked: false },
-        { title: '库存管理', key: 'inventory', checked: false },
-        { title: '物流管理', key: 'logistics', checked: false },
-      ]},
-      { title: '财务管理', key: 'finance', checked: true, children: [
-        { title: '订单管理', key: 'orders', checked: true },
-        { title: '通券管理', key: 'points', checked: false },
-        { title: '佣金管理', key: 'commission', checked: true },
-      ]},
-      { title: '系统管理', key: 'system', checked: false, children: [
-        { title: '管理员管理', key: 'admin_users', checked: false },
-        { title: '角色权限', key: 'admin_roles', checked: false },
-        { title: '系统配置', key: 'admin_config', checked: false },
-        { title: '操作日志', key: 'admin_logs', checked: false },
-      ]},
-    ]
-    setMenuPermissions(mockMenus)
-    const checkedKeys = mockMenus.reduce((acc: string[], m: any) => {
-      if (m.checked) acc.push(m.key)
-      if (m.children) {
-        m.children.forEach((child: any) => {
-          if (child.checked) acc.push(child.key)
-        })
-      }
-      return acc
-    }, [])
-    setCheckedKeys(checkedKeys)
-  }
-
-  const onRoleFinish = async (values: any) => {
-    try {
-      // 保存角色
-      message.success('角色保存成功')
-      setRoleModalVisible(false)
-      roleForm.resetFields()
-      setSelectedRole(null)
-      fetchRoles()
-    } catch (error) {
-      message.error('保存失败')
-    }
-  }
-
-  // ==================== 操作日志函数 ====================
-  const fetchLogs = async (page = 1) => {
+  const fetchLogs = async () => {
     setLogLoading(true)
     try {
       // 本地模拟数据
       const mockLogs = [
-        { id: '1', admin: 'admin', action: '创建商品', resource: '产品管理', details: '创建商品 iPhone 15', status: 'success', timestamp: '2024-11-20 14:30:45' },
-        { id: '2', admin: 'user_manager', action: '删除用户', resource: '用户管理', details: '删除用户 user_123', status: 'success', timestamp: '2024-11-20 13:15:20' },
-        { id: '3', admin: 'shop_manager', action: '审核店铺', resource: '店铺管理', details: '店铺申请已审核通过', status: 'success', timestamp: '2024-11-20 11:45:30' },
-        { id: '4', admin: 'admin', action: '修改配置', resource: '系统配置', details: '修改佣金比例', status: 'success', timestamp: '2024-11-20 10:20:15' },
-        { id: '5', admin: 'user_manager', action: '导出数据', resource: '用户管理', details: '导出用户列表', status: 'success', timestamp: '2024-11-19 16:00:00' },
+        { id: 1, admin_name: 'admin', action: '登录', details: '用户登录系统', created_at: new Date().toLocaleString() },
+        { id: 2, admin_name: 'admin', action: '修改配置', details: '修改系统配置', created_at: new Date().toLocaleString() },
       ]
       setLogs(mockLogs)
-      setLogPagination({ current: page, pageSize: 20, total: mockLogs.length })
     } catch (error) {
-      message.error('加载操作日志失败')
+      message.error('加载日志失败')
     } finally {
       setLogLoading(false)
     }
   }
+
+  const fetchBanners = async () => {
+    setBannerLoading(true)
+    try {
+      // 本地模拟数据
+      const mockBanners = [
+        { id: 1, title: '首页轮播1', link: 'https://example.com', order: 1, status: 'active', imageUrl: 'https://via.placeholder.com/1200x400' },
+        { id: 2, title: '首页轮播2', link: 'https://example.com', order: 2, status: 'active', imgUrl: 'https://via.placeholder.com/1200x400' },
+      ]
+      setBanners(mockBanners)
+    } catch (error) {
+      message.error('加载Banner列表失败')
+    } finally {
+      setBannerLoading(false)
+    }
+  }
+
+  const handleBannerUpload = async () => {
+    try {
+      message.success(selectedBanner ? 'Banner更新成功' : 'Banner添加成功')
+      setBannerModalVisible(false)
+      fetchBanners()
+    } catch (error) {
+      message.error('操作失败')
+    }
+  }
+
+  const handleCreateBanner = () => {
+    bannerForm.resetFields()
+    setSelectedBanner(null)
+    setBannerModalVisible(true)
+  }
+
+  const handleEditBanner = (banner: any) => {
+    const bannerWithFileList = {
+      ...banner,
+      fileList: banner.imageUrl || banner.imgUrl ? [
+        {
+          uid: banner.id,
+          name: `banner-${banner.id}.jpg`,
+          status: 'done',
+          url: banner.imageUrl || banner.imgUrl,
+          thumbUrl: banner.imageUrl || banner.imgUrl,
+        }
+      ] : []
+    }
+    // 先重置表单，然后设置值
+    bannerForm.resetFields()
+    // 使用setTimeout确保重置完成后再设置值
+    setTimeout(() => {
+      bannerForm.setFieldsValue(bannerWithFileList)
+    }, 0)
+    setSelectedBanner(banner)
+    setBannerModalVisible(true)
+  }
+
+  const handleDeleteBanner = async (id: number) => {
+    try {
+      message.success('Banner删除成功')
+      fetchBanners()
+    } catch (error) {
+      message.error('删除失败')
+    }
+  }
+
+  useEffect(() => {
+    fetchConfigs()
+    fetchAdmins()
+    fetchRoles()
+    fetchLogs()
+    fetchBanners()
+  }, [])
 
   return (
     <div className="config-page fade-in-down">
@@ -324,31 +301,52 @@ export default function Config() {
                   <Card className="card-with-shadow" style={{ marginBottom: 24 }}>
                     <Row gutter={[16, 16]} align="middle" style={{ marginBottom: 16 }}>
                       <Col xs={24} sm={12} md={12}>
-                        <Input
-                          placeholder="搜索配置名或描述"
-                          prefix={<SearchOutlined />}
-                          value={searchText}
-                          onChange={(e) => handleSearch(e.target.value)}
-                          allowClear
-                        />
+                        <Button type="primary" onClick={handleCreateConfig}>
+                          <PlusOutlined /> 新增配置
+                        </Button>
                       </Col>
-                      <Col xs={24} sm={12} md={12}>
+                      <Col xs={24} sm={12} md={12} style={{ textAlign: 'right' }}>
                         <Space>
-                          <Button icon={<ReloadOutlined />} onClick={() => fetchConfigs()}>刷新</Button>
-                          <Button type="primary" onClick={() => { form.resetFields(); setSelectedConfig(null); setModalVisible(true) }}>新增配置</Button>
-                          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出</Button>
+                          <Input
+                            placeholder="搜索配置名或描述"
+                            allowClear
+                            style={{ width: 200 }}
+                            onChange={(e) => handleSearch(e.target.value)}
+                            suffix={<SearchOutlined />}
+                          />
+                          <Button onClick={handleExport}>
+                            <DownloadOutlined /> 导出
+                          </Button>
+                          <Button onClick={() => fetchConfigs()}>
+                            <ReloadOutlined /> 刷新
+                          </Button>
                         </Space>
                       </Col>
                     </Row>
-                  </Card>
-
-                  <Card className="card-with-shadow">
                     <Table
-                      columns={columns}
+                      columns={[
+                        { title: '配置名', dataIndex: 'key', key: 'key' },
+                        { title: '配置值', dataIndex: 'value', key: 'value' },
+                        { title: '数据类型', dataIndex: 'type', key: 'type' },
+                        { title: '描述', dataIndex: 'description', key: 'description' },
+                        {
+                          title: '操作',
+                          key: 'action',
+                          render: (_, record) => (
+                            <Space size="middle">
+                              <Button type="link" onClick={() => handleEditConfig(record)}>
+                                <EditOutlined /> 编辑
+                              </Button>
+                              <Button type="link" danger onClick={() => handleDeleteConfig(record.key)}>
+                                <DeleteOutlined /> 删除
+                              </Button>
+                            </Space>
+                          ),
+                        },
+                      ]}
                       dataSource={filteredConfigs}
-                      loading={loading}
                       pagination={pagination}
-                      onChange={(pag: any) => fetchConfigs(pag.current || 1, pag.pageSize || 10)}
+                      loading={loading}
                       rowKey="key"
                     />
                   </Card>
@@ -363,46 +361,47 @@ export default function Config() {
                   <Card className="card-with-shadow" style={{ marginBottom: 24 }}>
                     <Row gutter={[16, 16]} align="middle" style={{ marginBottom: 16 }}>
                       <Col xs={24} sm={12} md={12}>
-                        <Input
-                          placeholder="搜索管理员名称或账户"
-                          prefix={<SearchOutlined />}
-                          value={adminSearchText}
-                          onChange={(e) => fetchAdmins(e.target.value)}
-                          allowClear
-                        />
+                        <Button type="primary" onClick={handleCreateAdmin}>
+                          <UserAddOutlined /> 新增管理员
+                        </Button>
                       </Col>
-                      <Col xs={24} sm={12} md={12}>
+                      <Col xs={24} sm={12} md={12} style={{ textAlign: 'right' }}>
                         <Space>
-                          <Button icon={<ReloadOutlined />} onClick={() => fetchAdmins()}>刷新</Button>
-                          <Button type="primary" icon={<UserAddOutlined />} onClick={() => { adminForm.resetFields(); setSelectedAdmin(null); setAdminModalVisible(true) }}>新增管理员</Button>
+                          <Button onClick={() => fetchAdmins()}>
+                            <ReloadOutlined /> 刷新
+                          </Button>
                         </Space>
                       </Col>
                     </Row>
-                  </Card>
-
-                  <Card className="card-with-shadow">
                     <Table
-                      loading={adminLoading}
-                      dataSource={admins}
-                      rowKey="id"
                       columns={[
+                        { title: 'ID', dataIndex: 'id', key: 'id' },
                         { title: '管理员名称', dataIndex: 'name', key: 'name' },
                         { title: '管理员账户', dataIndex: 'username', key: 'username' },
                         { title: '邮箱', dataIndex: 'email', key: 'email' },
-                        { title: '角色', dataIndex: 'role', key: 'role', render: (role: string) => <Tag color="blue">{role === 'super_admin' ? '超级管理员' : role === 'user_manager' ? '用户管理' : '店铺管理'}</Tag> },
-                        { title: '状态', dataIndex: 'status', key: 'status', render: (status: string) => <Badge status={status === 'active' ? 'success' : 'error'} text={status === 'active' ? '正常' : '禁用'} /> },
-                        { title: '最后登陆', dataIndex: 'lastLogin', key: 'lastLogin' },
+                        { title: '角色', dataIndex: 'role', key: 'role', render: (role: string) => (
+                          <Tag color={role === 'super_admin' ? 'red' : 'blue'}>
+                            {role === 'super_admin' ? '超级管理员' : role === 'user_manager' ? '用户管理' : role === 'shop_manager' ? '店铺管理' : '财务管理'}
+                          </Tag>
+                        )},
                         {
                           title: '操作',
                           key: 'action',
-                          render: (_: any, record: any) => (
-                            <Space size="small">
-                              <Button type="text" icon={<EditOutlined />} onClick={() => editAdmin(record)} />
-                              <Button type="text" danger icon={<DeleteOutlined />} onClick={() => deleteAdmin(record.id)} />
+                          render: (_, record) => (
+                            <Space size="middle">
+                              <Button type="link" onClick={() => handleEditAdmin(record)}>
+                                <EditOutlined /> 编辑
+                              </Button>
+                              <Button type="link" danger onClick={() => handleDeleteAdmin(record.id)}>
+                                <DeleteOutlined /> 删除
+                              </Button>
                             </Space>
                           ),
                         },
                       ]}
+                      dataSource={admins}
+                      loading={adminLoading}
+                      rowKey="id"
                     />
                   </Card>
                 </div>
@@ -410,107 +409,76 @@ export default function Config() {
             },
             {
               key: '3',
-              label: '角色权限管理',
+              label: '操作日志',
               children: (
                 <div>
-                  <Row gutter={24}>
-                    <Col xs={24} sm={24} md={8}>
-                      <Card className="card-with-shadow" style={{ marginBottom: 24 }}>
-                        <div style={{ marginBottom: 16 }}>
-                          <Button type="primary" icon={<PlusOutlined />} block onClick={() => { roleForm.resetFields(); setSelectedRole(null); setRoleModalVisible(true) }}>
-                            新增角色
-                          </Button>
-                        </div>
-                        <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                          {roles.length === 0 ? (
-                            <Empty description="暂无角色" />
-                          ) : (
-                            roles.map(role => (
-                              <div
-                                key={role.id}
-                                onClick={() => handleRoleSelect(role)}
-                                style={{
-                                  padding: '12px',
-                                  marginBottom: '8px',
-                                  backgroundColor: selectedRole?.id === role.id ? '#e6f7ff' : '#fafafa',
-                                  border: selectedRole?.id === role.id ? '1px solid #1890ff' : '1px solid #f0f0f0',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.3s',
-                                }}
-                              >
-                                <div style={{ fontWeight: selectedRole?.id === role.id ? 'bold' : 'normal' }}>{role.name}</div>
-                                <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>{role.adminCount} 个管理员</div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={24} md={16}>
-                      {selectedRole ? (
-                        <Card className="card-with-shadow">
-                          <div style={{ marginBottom: 16 }}>
-                            <h3>角色: {selectedRole.name}</h3>
-                            <p style={{ color: '#999', marginBottom: 0 }}>{selectedRole.description}</p>
-                          </div>
-                          <div style={{ marginBottom: 16 }}>
-                            <h4 style={{ marginBottom: 12 }}>权限配置</h4>
-                            <Tree
-                              checkable
-                              defaultExpandAll
-                              checkedKeys={checkedKeys}
-                              onCheck={(keys: any) => setCheckedKeys(keys)}
-                              treeData={menuPermissions.map((menu: any) => ({
-                                title: menu.title,
-                                key: menu.key,
-                                children: menu.children?.map((child: any) => ({
-                                  title: child.title,
-                                  key: child.key,
-                                })),
-                              }))}
-                            />
-                          </div>
-                          <div style={{ marginTop: 24 }}>
-                            <Space>
-                              <Button type="primary" onClick={() => onRoleFinish({})}>  保存权限</Button>
-                              <Button onClick={() => setSelectedRole(null)}>取消</Button>
-                            </Space>
-                          </div>
-                        </Card>
-                      ) : (
-                        <Card className="card-with-shadow" style={{ textAlign: 'center', color: '#999' }}>
-                          选择一个角色来配置权限
-                        </Card>
-                      )}
-                    </Col>
-                  </Row>
+                  <Card className="card-with-shadow">
+                    <Table
+                      columns={[
+                        { title: 'ID', dataIndex: 'id', key: 'id' },
+                        { title: '操作人', dataIndex: 'admin_name', key: 'admin_name' },
+                        { title: '操作类型', dataIndex: 'action', key: 'action' },
+                        { title: '操作详情', dataIndex: 'details', key: 'details' },
+                        { title: '操作时间', dataIndex: 'created_at', key: 'created_at' },
+                      ]}
+                      dataSource={logs}
+                      pagination={logPagination}
+                      loading={logLoading}
+                      rowKey="id"
+                    />
+                  </Card>
                 </div>
               ),
             },
             {
               key: '4',
-              label: '操作日志',
+              label: 'Banner管理',
               children: (
                 <div>
                   <Card className="card-with-shadow" style={{ marginBottom: 24 }}>
-                    <Button icon={<ReloadOutlined />} onClick={() => fetchLogs()}>刷新</Button>
-                  </Card>
-
-                  <Card className="card-with-shadow">
+                    <Row gutter={[16, 16]} align="middle" style={{ marginBottom: 16 }}>
+                      <Col xs={24} sm={12} md={12}>
+                        <Button type="primary" onClick={handleCreateBanner}>
+                          <PlusOutlined /> 新增Banner
+                        </Button>
+                      </Col>
+                      <Col xs={24} sm={12} md={12} style={{ textAlign: 'right' }}>
+                        <Space>
+                          <Button onClick={() => fetchBanners()}>
+                            <ReloadOutlined /> 刷新
+                          </Button>
+                        </Space>
+                      </Col>
+                    </Row>
                     <Table
-                      loading={logLoading}
-                      dataSource={logs}
-                      rowKey="id"
                       columns={[
-                        { title: '操作人', dataIndex: 'admin', key: 'admin' },
-                        { title: '操作类型', dataIndex: 'action', key: 'action' },
-                        { title: '资源模块', dataIndex: 'resource', key: 'resource' },
-                        { title: '操作详情', dataIndex: 'details', key: 'details' },
-                        { title: '结果', dataIndex: 'status', key: 'status', render: (status: string) => <Badge status={status === 'success' ? 'success' : 'error'} text={status === 'success' ? '成功' : '失败'} /> },
-                        { title: '操作时间', dataIndex: 'timestamp', key: 'timestamp' },
+                        { title: 'ID', dataIndex: 'id', key: 'id' },
+                        { title: '标题', dataIndex: 'title', key: 'title' },
+                        { title: '链接', dataIndex: 'link', key: 'link' },
+                        { title: '排序', dataIndex: 'order', key: 'order' },
+                        { title: '状态', dataIndex: 'status', key: 'status', render: (status: string) => (
+                          <Tag color={status === 'active' ? 'green' : 'gray'}>
+                            {status === 'active' ? '启用' : '禁用'}
+                          </Tag>
+                        )},
+                        {
+                          title: '操作',
+                          key: 'action',
+                          render: (_, record) => (
+                            <Space size="middle">
+                              <Button type="link" onClick={() => handleEditBanner(record)}>
+                                <EditOutlined /> 编辑
+                              </Button>
+                              <Button type="link" danger onClick={() => handleDeleteBanner(record.id)}>
+                                <DeleteOutlined /> 删除
+                              </Button>
+                            </Space>
+                          ),
+                        },
                       ]}
-                      pagination={{ current: logPagination.current, pageSize: logPagination.pageSize, total: logPagination.total }}
+                      dataSource={banners}
+                      loading={bannerLoading}
+                      rowKey="id"
                     />
                   </Card>
                 </div>
@@ -588,6 +556,92 @@ export default function Config() {
           )}
         </Form>
       </Modal>
+
+      {/* Banner编辑模态框 */}
+      <Modal
+        title={selectedBanner ? '编辑Banner' : '新增Banner'}
+        open={bannerModalVisible}
+        onOk={handleBannerUpload}
+        onCancel={() => {
+          const fileList = bannerForm.getFieldValue('fileList') || [];
+          fileList.forEach((file: any) => {
+            if (file.url && file.url.startsWith('blob:')) URL.revokeObjectURL(file.url);
+            if (file.thumbUrl && file.thumbUrl.startsWith('blob:')) URL.revokeObjectURL(file.thumbUrl);
+          });
+          setBannerModalVisible(false);
+          bannerForm.resetFields();
+          setSelectedBanner(null);
+        }}
+        width={600}
+      >
+        <Form form={bannerForm} layout="vertical" preserve={false}>
+          <Form.Item label="标题" name="title" rules={[{ required: true, message: '请输入Banner标题' }]}>
+            <Input placeholder="输入Banner标题" />
+          </Form.Item>
+          <Form.Item label="链接" name="link" rules={[{ required: true, message: '请输入Banner链接' }]}>
+            <Input placeholder="输入Banner链接" />
+          </Form.Item>
+          <Form.Item label="排序" name="order" rules={[{ required: true, message: '请输入排序号' }]}>
+            <InputNumber placeholder="输入排序号" />
+          </Form.Item>
+          <Form.Item label="状态" name="status" rules={[{ required: true, message: '请选择状态' }]}>
+            <Select placeholder="选择状态" options={[{ label: '启用', value: 'active' }, { label: '禁用', value: 'inactive' }]} />
+          </Form.Item>
+          <Form.Item label="图片上传" name="fileList" rules={[{ required: true, message: '请上传Banner图片' }]}>
+            <Upload
+              listType="picture-card"
+              beforeUpload={(file) => {
+                const isLt5M = file.size / 1024 / 1024 < 5;
+                if (!isLt5M) {
+                  message.error('图片大小不能超过5MB');
+                  return Upload.LIST_IGNORE;
+                }
+                const isImage = file.type.startsWith('image/');
+                if (!isImage) {
+                  message.error('请上传图片文件');
+                  return Upload.LIST_IGNORE;
+                }
+                return false;
+              }}
+              fileList={bannerForm.getFieldValue('fileList') || []}
+              onChange={(info) => {
+                const newFileList = info.fileList.map((file: any) => ({
+                  ...file,
+                  url: file.originFileObj ? URL.createObjectURL(file.originFileObj) : file.url,
+                  thumbUrl: file.originFileObj ? URL.createObjectURL(file.originFileObj) : file.thumbUrl,
+                  status: 'done'
+                }));
+                bannerForm.setFieldsValue({ fileList: newFileList });
+              }}
+              onRemove={(file) => {
+                if (file.url && file.url.startsWith('blob:')) URL.revokeObjectURL(file.url);
+                if (file.thumbUrl && file.thumbUrl.startsWith('blob:')) URL.revokeObjectURL(file.thumbUrl);
+                const currentList = bannerForm.getFieldValue('fileList') || [];
+                bannerForm.setFieldsValue({ fileList: currentList.filter((f: any) => f.uid !== file.uid) });
+                return true;
+              }}
+            >
+              <div>
+                <UploadOutlined />
+                <div style={{ marginTop: 8 }}>点击上传</div>
+              </div>
+            </Upload>
+          </Form.Item>
+          <div style={{ marginTop: 8, marginBottom: 16, fontSize: 12, color: '#999' }}>支持JPG、PNG格式，建议尺寸：1200x400像素</div>
+          {selectedBanner && (selectedBanner.imageUrl || selectedBanner.imgUrl) && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}>当前图片</div>
+              <Image
+                src={selectedBanner.imageUrl || selectedBanner.imgUrl}
+                width={200}
+                height={120}
+                style={{ objectFit: 'cover', borderRadius: 4, border: '1px solid #d9d9d9' }}
+                fallback="https://via.placeholder.com/200x120?text=暂无图片"
+              />
+            </div>
+          )}
+        </Form>
+      </Modal>
     </div>
-  )
+  );
 }

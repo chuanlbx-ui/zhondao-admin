@@ -481,7 +481,7 @@ export const {
   get,
   post,
   put,
-  delete,
+  'delete': del,
   getWithRetry,
   postWithRetry,
   getWithFallback,

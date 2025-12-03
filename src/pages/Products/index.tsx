@@ -62,124 +62,26 @@ export default function Products() {
   const fetchProducts = async (page = 1, pageSize = 10) => {
     setLoading(true)
     try {
-      // 本地模拟数据 - 核心产品
-      const mockProducts = [
-        { 
-          id: '1', 
-          name: '营养素A', 
-          category: 'NUTRITION', 
-          basePrice: 599, 
-          salePrice: 499,
-          cost: 200, 
-          stock: 100, 
-          lowStockThreshold: 10,
-          sku: 'NUT-001', 
-          barcode: '1234567890123',
-          brand: 'ZHONGDAO',
-          unit: 'BOTTLE',
-          weight: 500,
-          length: 15,
-          width: 8,
-          height: 8,
-          description: '高效营养素，补充日常所需维生素和矿物质', 
-          status: 'ACTIVE',
-          imageUrls: ['https://via.placeholder.com/300x300?text=营养素A'],
-          tags: ['营养品', '维生素', '矿物质']
-        },
-        { 
-          id: '2', 
-          name: '营养素B', 
-          category: 'NUTRITION', 
-          basePrice: 899, 
-          salePrice: 750,
-          cost: 300, 
-          stock: 50, 
-          lowStockThreshold: 15,
-          sku: 'NUT-002', 
-          barcode: '1234567890124',
-          brand: 'NATURE_BOUNTY',
-          unit: 'BOTTLE',
-          weight: 800,
-          length: 18,
-          width: 10,
-          height: 10,
-          description: '增强型配方，专为现代人设计', 
-          status: 'ACTIVE',
-          imageUrls: ['https://via.placeholder.com/300x300?text=营养素B'],
-          tags: ['营养品', '增强型', '现代配方']
-        },
-        { 
-          id: '3', 
-          name: '日用洗护套装', 
-          category: 'DAILY', 
-          basePrice: 299, 
-          salePrice: 250,
-          cost: 80, 
-          stock: 200, 
-          lowStockThreshold: 20,
-          sku: 'DAI-001', 
-          barcode: '1234567890125',
-          brand: 'ZHONGDAO',
-          unit: 'BOX',
-          weight: 1200,
-          length: 25,
-          width: 15,
-          height: 12,
-          description: '温和配方，适合全家使用', 
-          status: 'ACTIVE',
-          imageUrls: ['https://via.placeholder.com/300x300?text=洗护套装'],
-          tags: ['日用品', '洗护', '温和']
-        },
-        { 
-          id: '4', 
-          name: '美颜面膜', 
-          category: 'BEAUTY', 
-          basePrice: 399, 
-          salePrice: 320,
-          cost: 120, 
-          stock: 80, 
-          lowStockThreshold: 12,
-          sku: 'BEA-001', 
-          barcode: '1234567890126',
-          brand: 'BY_HEALTH',
-          unit: 'BOX',
-          weight: 300,
-          length: 20,
-          width: 12,
-          height: 3,
-          description: '深层保湿，让肌肤水润光滑', 
-          status: 'ACTIVE',
-          imageUrls: ['https://via.placeholder.com/300x300?text=美颜面膜'],
-          tags: ['美妆', '面膜', '保湿']
-        },
-        { 
-          id: '5', 
-          name: '蛋白粉', 
-          category: 'FOOD', 
-          basePrice: 499, 
-          salePrice: 420,
-          cost: 150, 
-          stock: 0, 
-          lowStockThreshold: 8,
-          sku: 'FOO-001', 
-          barcode: '1234567890127',
-          brand: 'INFINITUS',
-          unit: 'CAN',
-          weight: 1000,
-          length: 22,
-          width: 22,
-          height: 18,
-          description: '高蛋白配方，运动营养补充', 
-          status: 'INACTIVE',
-          imageUrls: ['https://via.placeholder.com/300x300?text=蛋白粉'],
-          tags: ['食品', '蛋白粉', '运动营养']
-        },
-      ]
-      setProducts(mockProducts)
-      applyFilters(mockProducts, searchText, filterCategory)
-      setPagination({ current: page, pageSize, total: mockProducts.length })
-    } catch (error) {
-      message.error('加载商品列表失败')
+      // 调用实际API获取商品数据
+      const response = await adminProductApi.getList({
+        page,
+        limit: pageSize,
+        search: searchText,
+        category: filterCategory
+      })
+      
+      const productData = response.data || response
+      const productsList = productData.items || productData.list || []
+      setProducts(productsList)
+      applyFilters(productsList, searchText, filterCategory)
+      setPagination({
+        current: page,
+        pageSize,
+        total: productData.total || 0
+      })
+    } catch (error: any) {
+      console.error('加载商品列表失败:', error)
+      message.error(error.message || '加载商品列表失败')
     } finally {
       setLoading(false)
     }
@@ -460,22 +362,32 @@ export default function Products() {
     const { file, onSuccess, onError } = options
     
     try {
-      // 这里模拟上传过程，实际应该调用后端上传接口
       setUploading(true)
       
-      // 模拟上传延迟
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // 创建FormData对象上传图片
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('type', 'product')
       
-      // 模拟上传成功，返回图片URL
-      // 实际项目中应该调用真实的图片上传API
-      const imageUrl = URL.createObjectURL(file)
+      // 调用后端上传接口
+      const response = await adminApiClient.post('/admin/upload/image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      })
       
-      onSuccess({ url: imageUrl })
-      message.success(`${file.name} 上传成功`)
+      const result = response.data || response
+      if (result.url) {
+        onSuccess({ url: result.url })
+        message.success(`${file.name} 上传成功`)
+      } else {
+        throw new Error('上传失败，未返回图片URL')
+      }
       
-    } catch (error) {
+    } catch (error: any) {
+      console.error('图片上传失败:', error)
       onError(error)
-      message.error(`${file.name} 上传失败`)
+      message.error(`${file.name} 上传失败: ${error.message || '未知错误'}`)
     } finally {
       setUploading(false)
     }

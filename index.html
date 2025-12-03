@@ -20,7 +20,14 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- 通过 data 属性注入运行时配置（由服务器填充） -->
+    <div 
+      id="root"
+      data-api-base="${API_BASE}"
+      data-admin-url="${ADMIN_URL}"
+      data-api-timeout="${API_TIMEOUT}"
+      data-debug="${DEBUG}"
+    ></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
